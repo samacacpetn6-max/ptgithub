@@ -1,10 +1,17 @@
 export const config = {
   api: {
-    bodyParser: {
-      sizeLimit: "1mb"
-    }
+    bodyParser: false
   }
 };
+
+function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", chunk => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}
 
 export default async function handler(req, res) {
   try {
@@ -13,7 +20,10 @@ export default async function handler(req, res) {
     }
 
     const event = req.headers["x-github-event"];
-    const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
+    const rawBody = await getRawBody(req);
+
+    let payload = {};
+    try { payload = JSON.parse(rawBody); } catch {}
 
     const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
     if (!DISCORD_WEBHOOK_URL) {
