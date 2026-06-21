@@ -11,9 +11,9 @@ export default async function handler(req, res) {
 
     // default embed
     let embed = {
-      title: "GitHub Event",
+      title: "gitHub event",
       color: 0xe3aaff,
-      description: "Unknown event",
+      description: "unknown event",
       timestamp: new Date().toISOString()
     };
 
@@ -49,13 +49,13 @@ export default async function handler(req, res) {
           "\n```",
         fields: [
           {
-            name: "Commit",
+            name: "commit",
             value: `\`${commitId}\` - ${commitMsg}`,
             inline: false
           }
         ],
         footer: {
-          text: `GitHub Push • ${payload.pusher?.name || "unknown"}`
+          text: `gitHub push • ${payload.pusher?.name || "unknown"}`
         },
         timestamp: new Date().toISOString()
       };
