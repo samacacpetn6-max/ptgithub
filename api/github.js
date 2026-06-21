@@ -6,7 +6,6 @@ export default async function handler(req, res) {
 
     const event = req.headers["x-github-event"];
 
-    // 🔥 SAFE BODY PARSING (Vercel fix)
     const payload =
       typeof req.body === "string"
         ? JSON.parse(req.body || "{}")
@@ -15,13 +14,13 @@ export default async function handler(req, res) {
     const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
     if (!DISCORD_WEBHOOK_URL) {
-      throw new Error("Missing DISCORD_WEBHOOK_URL");
+      return res.status(200).json({ ok: false, error: "Missing webhook URL" });
     }
 
     let embed = {
-      title: "gitHub event",
+      title: "GitHub Event",
       color: 0xe3aaff,
-      description: "unknown event",
+      description: "No data",
       timestamp: new Date().toISOString()
     };
 
@@ -47,23 +46,24 @@ export default async function handler(req, res) {
           ? files.map(f => `! ${f}`).join("\n")
           : "No file changes";
 
+      const safeDiff = "```diff\n" + fileList + "\n```";
+
       embed = {
         title: repo,
         color: 0xe3aaff,
         description:
-          `There has been **${commits.length || 1} commit(s)** to **${repo}**\n\n` +
-          "```diff\n" +
-          fileList +
-          "\n```",
+          `🚀 **Push Event**\n` +
+          `🧾 ${commits.length || 1} commit(s)\n\n` +
+          safeDiff,
         fields: [
           {
             name: "Commit",
-            value: `\`${commitId}\` - ${commitMsg}`,
+            value: `\`${commitId}\` — ${commitMsg}`.slice(0, 1024),
             inline: false
           }
         ],
         footer: {
-          text: `GitHub Push • ${payload?.pusher?.name || "unknown"}`
+          text: `GitHub • ${payload?.pusher?.name || "unknown"}`
         },
         timestamp: new Date().toISOString()
       };
@@ -73,15 +73,16 @@ export default async function handler(req, res) {
     // 🔀 PULL REQUEST EVENT
     // =========================
     if (event === "pull_request") {
-      const pr = payload?.pull_request;
+      const pr = payload?.pull_request || {};
+      const repo = payload?.repository?.full_name || "repo";
 
       embed = {
-        title: payload?.repository?.full_name || "repo",
+        title: repo,
         color: 0xe3aaff,
         description:
-          `There has been a **PR ${pr?.action || "update"}**\n\n` +
-          `**${pr?.title || "No title"}**\n` +
-          `${pr?.html_url || ""}`,
+          `🔀 **PR ${pr?.action || "update"}**\n` +
+          `**${pr?.title || "No title"}**\n\n` +
+          (pr?.html_url || ""),
         footer: {
           text: `PR • ${pr?.user?.login || "unknown"}`
         },
@@ -90,28 +91,33 @@ export default async function handler(req, res) {
     }
 
     // =========================
-    // SEND TO DISCORD (SAFE)
+    // DISCORD SEND (100% SAFE)
     // =========================
+    const safePayload = {
+      embeds: [
+        {
+          ...embed,
+          description:
+            (embed.description || "No content").slice(0, 4096)
+        }
+      ]
+    };
+
     const discordRes = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ embeds: [embed] })
+      body: JSON.stringify(safePayload)
     });
 
+    // Discord can fail silently → still handle it safely
     if (!discordRes.ok) {
       const text = await discordRes.text();
       console.error("Discord error:", text);
     }
 
-    // 🔥 ALWAYS SUCCESS FOR GITHUB (IMPORTANT)
     return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error("Webhook error:", err);
-
-    // NEVER break GitHub webhook delivery
-    return res.status(200).json({
-      ok: false,
-      error: err.message
-    });
+    console.error("Webhook crash:", err);
+    return res.status(200).json({ ok: false });
   }
 }
