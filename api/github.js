@@ -1,3 +1,9 @@
+export const config = {
+  api: {
+    bodyParser: false
+  }
+};
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -6,27 +12,33 @@ export default async function handler(req, res) {
 
     const event = req.headers["x-github-event"];
 
-    // SAFE PARSE (Vercel fix)
-    const payload = (() => {
-      try {
-        return typeof req.body === "string"
-          ? JSON.parse(req.body)
-          : req.body || {};
-      } catch {
-        return {};
-      }
-    })();
+    // =========================
+    // 🔥 RAW BODY PARSER (CRITICAL FIX)
+    // =========================
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+
+    const rawBody = Buffer.concat(chunks).toString("utf8");
+
+    let payload = {};
+    try {
+      payload = JSON.parse(rawBody || "{}");
+    } catch {
+      payload = {};
+    }
 
     const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
     if (!DISCORD_WEBHOOK_URL) {
-      return res.status(200).json({ ok: false, error: "No webhook URL" });
+      return res.status(200).json({ ok: false, error: "Missing webhook" });
     }
 
     const color = 0xe3aaff;
 
     // =========================
-    // PUSH EVENT
+    // 🚀 PUSH EVENT
     // =========================
     if (event === "push") {
       const repo =
@@ -41,13 +53,13 @@ export default async function handler(req, res) {
         payload?.commits?.slice(-1)[0] ||
         {};
 
-      const commitMsg =
-        head?.message?.split("\n")[0] ||
-        "No message";
-
       const commitId =
         head?.id?.slice(0, 7) ||
         "unknown";
+
+      const commitMsg =
+        head?.message?.split("\n")[0] ||
+        "No message";
 
       const files = [
         ...(head?.added || []),
@@ -85,7 +97,7 @@ export default async function handler(req, res) {
     }
 
     // =========================
-    // PR EVENT
+    // 🔀 PULL REQUEST
     // =========================
     if (event === "pull_request") {
       const pr = payload?.pull_request || {};
@@ -98,7 +110,7 @@ export default async function handler(req, res) {
         title: repo,
         color,
         description:
-          `🔀 **Pull Request ${pr?.action || "update"}**\n\n` +
+          `🔀 **PR ${pr?.action || "update"}**\n\n` +
           `**${pr?.title || "No title"}**\n` +
           (pr?.html_url || ""),
         footer: {
@@ -111,9 +123,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // =========================
-    // DEFAULT (ping etc.)
-    // =========================
     return res.status(200).json({ ok: true });
 
   } catch (err) {
@@ -123,7 +132,7 @@ export default async function handler(req, res) {
 }
 
 // =========================
-// DISCORD SENDER (SAFE)
+// 📤 DISCORD SENDER
 // =========================
 async function sendDiscord(url, embed) {
   await fetch(url, {
