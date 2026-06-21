@@ -6,34 +6,48 @@ export default async function handler(req, res) {
 
     const event = req.headers["x-github-event"];
 
-    const payload =
-      typeof req.body === "string"
-        ? JSON.parse(req.body || "{}")
-        : req.body || {};
+    // SAFE PARSE (Vercel fix)
+    const payload = (() => {
+      try {
+        return typeof req.body === "string"
+          ? JSON.parse(req.body)
+          : req.body || {};
+      } catch {
+        return {};
+      }
+    })();
 
     const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
     if (!DISCORD_WEBHOOK_URL) {
-      return res.status(200).json({ ok: false, error: "Missing webhook URL" });
+      return res.status(200).json({ ok: false, error: "No webhook URL" });
     }
 
-    let embed = {
-      title: "GitHub Event",
-      color: 0xe3aaff,
-      description: "No data",
-      timestamp: new Date().toISOString()
-    };
+    const color = 0xe3aaff;
 
     // =========================
-    // 🚀 PUSH EVENT
+    // PUSH EVENT
     // =========================
     if (event === "push") {
-      const repo = payload?.repository?.full_name || "unknown/repo";
-      const commits = payload?.commits || [];
-      const head = payload?.head_commit || {};
+      const repo =
+        payload?.repository?.full_name ||
+        payload?.repository?.name ||
+        "unknown/repo";
 
-      const commitId = head?.id?.slice(0, 7) || "unknown";
-      const commitMsg = head?.message?.split("\n")[0] || "No message";
+      const commits = payload?.commits || [];
+
+      const head =
+        payload?.head_commit ||
+        payload?.commits?.slice(-1)[0] ||
+        {};
+
+      const commitMsg =
+        head?.message?.split("\n")[0] ||
+        "No message";
+
+      const commitId =
+        head?.id?.slice(0, 7) ||
+        "unknown";
 
       const files = [
         ...(head?.added || []),
@@ -41,20 +55,18 @@ export default async function handler(req, res) {
         ...(head?.removed || [])
       ].slice(0, 10);
 
-      const fileList =
+      const fileBlock =
         files.length > 0
-          ? files.map(f => `! ${f}`).join("\n")
-          : "No file changes";
+          ? "```diff\n" + files.map(f => `! ${f}`).join("\n") + "\n```"
+          : "```No file changes```";
 
-      const safeDiff = "```diff\n" + fileList + "\n```";
-
-      embed = {
+      const embed = {
         title: repo,
-        color: 0xe3aaff,
+        color,
         description:
           `🚀 **Push Event**\n` +
           `🧾 ${commits.length || 1} commit(s)\n\n` +
-          safeDiff,
+          fileBlock,
         fields: [
           {
             name: "Commit",
@@ -67,57 +79,63 @@ export default async function handler(req, res) {
         },
         timestamp: new Date().toISOString()
       };
+
+      await sendDiscord(DISCORD_WEBHOOK_URL, embed);
+      return res.status(200).json({ ok: true });
     }
 
     // =========================
-    // 🔀 PULL REQUEST EVENT
+    // PR EVENT
     // =========================
     if (event === "pull_request") {
       const pr = payload?.pull_request || {};
-      const repo = payload?.repository?.full_name || "repo";
 
-      embed = {
+      const repo =
+        payload?.repository?.full_name ||
+        "unknown/repo";
+
+      const embed = {
         title: repo,
-        color: 0xe3aaff,
+        color,
         description:
-          `🔀 **PR ${pr?.action || "update"}**\n` +
-          `**${pr?.title || "No title"}**\n\n` +
+          `🔀 **Pull Request ${pr?.action || "update"}**\n\n` +
+          `**${pr?.title || "No title"}**\n` +
           (pr?.html_url || ""),
         footer: {
           text: `PR • ${pr?.user?.login || "unknown"}`
         },
         timestamp: new Date().toISOString()
       };
+
+      await sendDiscord(DISCORD_WEBHOOK_URL, embed);
+      return res.status(200).json({ ok: true });
     }
 
     // =========================
-    // DISCORD SEND (100% SAFE)
+    // DEFAULT (ping etc.)
     // =========================
-    const safePayload = {
+    return res.status(200).json({ ok: true });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(200).json({ ok: true });
+  }
+}
+
+// =========================
+// DISCORD SENDER (SAFE)
+// =========================
+async function sendDiscord(url, embed) {
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       embeds: [
         {
           ...embed,
-          description:
-            (embed.description || "No content").slice(0, 4096)
+          description: (embed.description || "No content").slice(0, 4096)
         }
       ]
-    };
-
-    const discordRes = await fetch(DISCORD_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(safePayload)
-    });
-
-    // Discord can fail silently → still handle it safely
-    if (!discordRes.ok) {
-      const text = await discordRes.text();
-      console.error("Discord error:", text);
-    }
-
-    return res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error("Webhook crash:", err);
-    return res.status(200).json({ ok: false });
-  }
+    })
+  });
 }
